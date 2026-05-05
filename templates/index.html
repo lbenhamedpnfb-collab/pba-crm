@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>PBA CRM — Beauté & Esthétique · Groupe DEFIS</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ═══ SIDEBAR ═══════════════════════════════════════════════════════════════ -->
+<aside class="sidebar">
+  <div class="sb-brand">
+    <div class="sb-logo">💄</div>
+    <div class="sb-brand-text">
+      <h1>PBA CRM</h1>
+      <p>Groupe DEFIS · Beauté</p>
+    </div>
+  </div>
+
+  <div class="sb-scroll">
+
+    <div class="sb-label">Pilotage</div>
+    <div class="sb-item active" data-v="mission" onclick="setView('mission')">
+      <span class="ic">🎯</span><span class="lbl">Mission Control</span>
+      <span class="bdg bdg-r" id="bdg-today">—</span>
+    </div>
+    <div class="sb-item" data-v="kanban" onclick="setView('kanban')">
+      <span class="ic">📋</span><span class="lbl">Pipeline Kanban</span>
+    </div>
+    <div class="sb-item" data-v="sequences" onclick="setView('sequences')">
+      <span class="ic">⚡</span><span class="lbl">Séquences Prospection</span>
+    </div>
+    <div class="sb-item" data-v="growth" onclick="setView('growth')">
+      <span class="ic">🚀</span><span class="lbl">Growth Dashboard</span>
+    </div>
+    <div class="sb-item" data-v="pipeline" onclick="setView('pipeline')">
+      <span class="ic">📊</span><span class="lbl">Pipeline Commercial</span>
+    </div>
+    <div class="sb-item" data-v="partners" onclick="setView('partners')">
+      <span class="ic">🤝</span><span class="lbl">Partenaires & OPCO</span>
+      <span class="bdg bdg-b" id="bdg-part">—</span>
+    </div>
+
+    <div class="sb-label">Contacts</div>
+    <div class="sb-item" data-v="strategic" onclick="setView('strategic')">
+      <span class="ic">⭐</span><span class="lbl">Comptes Stratégiques</span>
+    </div>
+    <div class="sb-item" data-v="poei-view" onclick="setView('poei-view')">
+      <span class="ic">🎓</span><span class="lbl">Contacts POEI</span>
+      <span class="bdg bdg-r" id="bdg-poei">—</span>
+    </div>
+    <div class="sb-item" data-v="alt-view" onclick="setView('alt-view')">
+      <span class="ic">🎒</span><span class="lbl">Contacts Alternance</span>
+      <span class="bdg" style="background:#9B2D8E22;color:#9B2D8E" id="bdg-alt">—</span>
+    </div>
+    <div class="sb-item" data-v="all-contacts" onclick="setView('all-contacts')">
+      <span class="ic">👥</span><span class="lbl">Tous les contacts</span>
+      <span class="bdg bdg-g" id="bdg-total">—</span>
+    </div>
+    <div class="sb-item" onclick="openContactForm()" style="border-left:2px solid #0F9D58;margin-left:4px">
+      <span class="ic">➕</span><span class="lbl" style="color:#0F9D58;font-weight:800">Ajouter un contact</span>
+    </div>
+
+    <div class="sb-label">Par Secteur</div>
+    <div id="sb-sectors"></div>
+
+    <div class="sb-label">Suivi</div>
+    <div class="sb-item" data-v="email-suivi" onclick="setView('email-suivi')">
+      <span class="ic">📧</span><span class="lbl">Suivi Emails & Relances</span>
+      <span class="bdg bdg-r" id="bdg-relances">—</span>
+    </div>
+
+    <div class="sb-label">Outils</div>
+    <div class="sb-item" data-v="templates" onclick="setView('templates')">
+      <span class="ic">✉️</span><span class="lbl">Templates Email</span>
+    </div>
+    <div class="sb-item" data-v="scripts" onclick="setView('scripts')">
+      <span class="ic">📞</span><span class="lbl">Scripts Appels</span>
+    </div>
+    <div class="sb-item" data-v="metrics" onclick="setView('metrics')">
+      <span class="ic">📈</span><span class="lbl">Métriques & KPIs</span>
+    </div>
+
+    <div class="sb-label">Admin</div>
+    <div class="sb-item" data-v="settings" onclick="setView('settings')">
+      <span class="ic">⚙️</span><span class="lbl">Paramètres & Équipe</span>
+    </div>
+
+  </div>
+
+  <div class="sb-user">
+    <div class="sb-av" id="sb-av">?</div>
+    <div class="sb-user-info">
+      <div class="sb-un" id="sb-username">—</div>
+      <div class="sb-ro">PBA Admin</div>
+    </div>
+    <button class="sb-logout" onclick="doLogout()" title="Déconnexion">⏻</button>
+  </div>
+</aside>
+
+<!-- ═══ MAIN ════════════════════════════════════════════════════════════════ -->
+<main class="main">
+  <div class="topbar">
+    <div class="topbar-titles">
+      <div class="tb-title" id="tb-title">Mission Control</div>
+      <div class="tb-sub" id="tb-sub">PBA · Beauté & Esthétique · Groupe DEFIS</div>
+    </div>
+    <div class="tb-sep"></div>
+    <input type="text" id="tb-search" class="tb-search" placeholder="🔍 Rechercher entreprise, contact…" oninput="onSearch(this.value)">
+    <div class="tb-actions">
+      <button class="btn btn-r" onclick="openContactForm()">➕ Nouveau</button>
+      <button class="btn btn-s" onclick="exportCSV()" title="Exporter CSV">⬇ Export</button>
+    </div>
+  </div>
+
+  <div id="content">
+    <div class="loading-state">
+      <div class="loading-spinner"></div>
+      <span>Chargement…</span>
+    </div>
+  </div>
+</main>
+
+<!-- ═══ CONTACT MODAL ══════════════════════════════════════════════════════ -->
+<div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">Contact</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body">
+      <div class="loading-state"><div class="loading-spinner"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ EMAIL MODAL ════════════════════════════════════════════════════════ -->
+<div id="email-overlay" class="modal-overlay" onclick="if(event.target===this)closeEmailModal()">
+  <div class="modal-box" style="max-width:500px">
+    <div class="modal-header">
+      <div class="modal-title" id="email-modal-title">Suivi Email</div>
+      <button class="modal-close" onclick="closeEmailModal()">✕</button>
+    </div>
+    <div class="modal-body" id="email-modal-body">
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
