@@ -84,6 +84,69 @@ class Setting(db.Model):
     key   = db.Column(db.String(100), unique=True, nullable=False)
     value = db.Column(db.String(500))
 
+# ─── SECTOR CANONICALIZATION ─────────────────────────────────────────────────
+
+def _norm_sector(s):
+    return (s or '').replace('️', '').strip()
+
+_SECTOR_CANON = {
+    'coiffure': '💇 Coiffure',
+    'coiff': '💇 Coiffure',
+    'hair': '💇 Coiffure',
+    'esthétique': '💅 Esthétique/Soins',
+    'esthetique': '💅 Esthétique/Soins',
+    'esthétique/soins': '💅 Esthétique/Soins',
+    'esthetique/soins': '💅 Esthétique/Soins',
+    'soins esthétiques': '💅 Esthétique/Soins',
+    'soins': '💅 Esthétique/Soins',
+    'spa': '🧖 Spa/Bien-être',
+    'bien-être': '🧖 Spa/Bien-être',
+    'bienetre': '🧖 Spa/Bien-être',
+    'bien etre': '🧖 Spa/Bien-être',
+    'spa/bien-être': '🧖 Spa/Bien-être',
+    'maquillage': '💋 Maquillage pro',
+    'maquillage pro': '💋 Maquillage pro',
+    'make-up': '💋 Maquillage pro',
+    'makeup': '💋 Maquillage pro',
+    'retail': '🛍️ Retail Beauté',
+    'retail beauté': '🛍️ Retail Beauté',
+    'retail beaute': '🛍️ Retail Beauté',
+    'commerce beauté': '🛍️ Retail Beauté',
+    'cosmétique': '💊 Cosmétique/Pharma',
+    'cosmetique': '💊 Cosmétique/Pharma',
+    'cosmétique/pharma': '💊 Cosmétique/Pharma',
+    'cosmetique/pharma': '💊 Cosmétique/Pharma',
+    'pharma': '💊 Cosmétique/Pharma',
+    'pharmacie': '💊 Cosmétique/Pharma',
+    'partenaire': '🤝 Partenaire',
+    'opco': '🤝 Partenaire',
+    'mission locale': '🤝 Partenaire',
+    'cfa': '🤝 Partenaire',
+    'prescripteur': '🤝 Partenaire',
+}
+
+_CANONICAL_SECTORS = {
+    '💇 Coiffure', '💅 Esthétique/Soins', '🧖 Spa/Bien-être',
+    '💋 Maquillage pro', '🛍️ Retail Beauté', '💊 Cosmétique/Pharma',
+    '🤝 Partenaire'
+}
+
+def _canonicalize_sector(s):
+    if not s: return s
+    s = _norm_sector(s)
+    if s in _CANONICAL_SECTORS: return s
+    key = s.lower().strip()
+    if key in _SECTOR_CANON: return _SECTOR_CANON[key]
+    for alias, canon in _SECTOR_CANON.items():
+        words = [w for w in alias.split() if len(w) > 2]
+        key_words = [w for w in key.split() if len(w) > 2]
+        if words and key_words and any(
+            w in key_words or any(kw in w or w in kw for kw in key_words)
+            for w in words
+        ):
+            return canon
+    return s
+
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 PROB = {'Prospect':.05,'Contacted':.15,'Meeting':.35,'Proposal':.60,'Negotiation':.80,'Signed':1.0}
@@ -211,7 +274,7 @@ def api_create_contact():
     d = request.json or {}
     c = Contact(
         company=d.get('company',''),name=d.get('name',''),role=d.get('role',''),
-        email=d.get('email',''),phone=d.get('phone',''),sector=d.get('sector',''),
+        email=d.get('email',''),phone=d.get('phone',''),sector=_canonicalize_sector(d.get('sector','')),
         segment=d.get('segment','Long Term'),stage=d.get('stage','Prospect'),
         score=d.get('score',0),priority=d.get('priority','Medium'),
         formation_type=d.get('formation_type',''),formation_level=d.get('formation_level',''),
@@ -240,7 +303,9 @@ def api_patch_contact(cid):
     d = request.json or {}
     old_stage = c.stage
     for k, v in d.items():
-        if hasattr(c, k): setattr(c, k, v)
+        if hasattr(c, k):
+            val = _canonicalize_sector(v) if k == 'sector' else v
+            setattr(c, k, val)
     if 'stage' in d and d['stage'] != old_stage:
         c.stage_changed_at = date.today().isoformat()
     c.last_activity_at = date.today().isoformat()
@@ -509,6 +574,78 @@ def api_metrics():
         'by_segment':{s: sum(1 for c in contacts if c.segment==s)
                       for s in ('Strategic','Quick Win','Long Term','Dormant','Partner')},
     })
+
+# ─── ADMIN ───────────────────────────────────────────────────────────────────
+
+@app.route('/api/admin/normalize-sectors', methods=['POST'])
+def api_normalize_sectors():
+    if require_auth(): return require_auth()
+    if session.get('role') != 'admin':
+        return jsonify({'error': 'Admin requis'}), 403
+    contacts = Contact.query.all()
+    fixed = 0
+    for c in contacts:
+        canon = _canonicalize_sector(c.sector)
+        if canon != c.sector:
+            c.sector = canon
+            fixed += 1
+    db.session.commit()
+    return jsonify({'ok': True, 'fixed': fixed, 'total': len(contacts)})
+
+@app.route('/api/seed/demo', methods=['POST'])
+def api_seed_demo():
+    if require_auth(): return require_auth()
+    if session.get('role') != 'admin':
+        return jsonify({'error': 'Admin requis'}), 403
+    if Contact.query.count() > 0:
+        return jsonify({'error': 'La base contient déjà des contacts. Utilisez "Normaliser les secteurs" à la place.'}), 400
+    demo = [
+        {'company':'Dessange Paris','name':'Marie Laurent','role':'DRH','email':'drh@dessange.fr',
+         'sector':'💇 Coiffure','segment':'Strategic','stage':'Meeting','score':72,
+         'formation_type':'Les deux','nb_postes':8,'nb_alternants':12,'opco':'OPCO EP',
+         'next_action':'RDV présentation PBA','next_action_date':date.today().isoformat()},
+        {'company':'Coiff & Co','name':'Pierre Dubois','role':'Directeur Recrutement','email':'p.dubois@coiffco.fr',
+         'sector':'💇 Coiffure','segment':'Quick Win','stage':'Contacted','score':55,
+         'formation_type':'Alternance','nb_postes':0,'nb_alternants':6,'opco':'OPCO EP',
+         'next_action':'Relance email alternance','next_action_date':(date.today()+timedelta(days=3)).isoformat()},
+        {'company':'Yves Rocher','name':'Sophie Martin','role':'Responsable Formation','email':'s.martin@yvesrocher.com',
+         'sector':'🛍️ Retail Beauté','segment':'Strategic','stage':'Proposal','score':88,
+         'formation_type':'Les deux','nb_postes':15,'nb_alternants':20,'opco':'OPCO Atlas',
+         'next_action':'Envoyer convention POEI','next_action_date':date.today().isoformat()},
+        {'company':"L'Oréal Paris",'name':'Thomas Bernard','role':'DRH France','email':'t.bernard@loreal.com',
+         'sector':'💊 Cosmétique/Pharma','segment':'Strategic','stage':'Negotiation','score':95,
+         'formation_type':'POEI','nb_postes':25,'nb_alternants':0,'opco':'OPCO EP',
+         'next_action':'Finaliser accord-cadre POEI','next_action_date':date.today().isoformat()},
+        {'company':'Franck Provost','name':'Isabelle Leroy','role':'Coordinatrice RH','email':'i.leroy@franckprovost.fr',
+         'sector':'💇 Coiffure','segment':'Long Term','stage':'Contacted','score':42,
+         'formation_type':'POEI','nb_postes':5,'nb_alternants':0,'opco':'OPCO EP',
+         'next_action':'Appel de relance','next_action_date':(date.today()+timedelta(days=7)).isoformat()},
+        {'company':'Nuxe','name':'Caroline Petit','role':'Directrice Formation','email':'c.petit@nuxe.com',
+         'sector':'💊 Cosmétique/Pharma','segment':'Long Term','stage':'Prospect','score':28,
+         'formation_type':'Alternance','nb_postes':0,'nb_alternants':4,'opco':'OPCO Atlas',
+         'next_action':'Envoyer email alternance','next_action_date':(date.today()+timedelta(days=2)).isoformat()},
+        {'company':'Sephora France','name':'Marc Dupont','role':'DRH','email':'m.dupont@sephora.com',
+         'sector':'🛍️ Retail Beauté','segment':'Strategic','stage':'Meeting','score':78,
+         'formation_type':'Les deux','nb_postes':10,'nb_alternants':15,'opco':'OPCO EP',
+         'next_action':'RDV Teams présentation école','next_action_date':(date.today()+timedelta(days=5)).isoformat()},
+        {'company':'Clarins Institut','name':'Anne Moreau','role':'Responsable Esthétique','email':'a.moreau@clarins.com',
+         'sector':'💅 Esthétique/Soins','segment':'Quick Win','stage':'Proposal','score':65,
+         'formation_type':'POEI','nb_postes':6,'nb_alternants':0,'opco':'OPCO EP',
+         'next_action':'Envoyer devis POEI esthétique','next_action_date':date.today().isoformat()},
+        {'company':'Spa Cinq Mondes','name':'Julie Chen','role':'Directrice','email':'j.chen@cinqmondes.com',
+         'sector':'🧖 Spa/Bien-être','segment':'Long Term','stage':'Contacted','score':35,
+         'formation_type':'Alternance','nb_postes':0,'nb_alternants':3,'opco':'OPCO Atlas',
+         'next_action':'Présentation CAP esthétique','next_action_date':(date.today()+timedelta(days=10)).isoformat()},
+        {'company':'MAC Cosmetics','name':'Kevin Wilson','role':'Store Manager Formation','email':'k.wilson@mac.com',
+         'sector':'💋 Maquillage pro','segment':'Quick Win','stage':'Contacted','score':48,
+         'formation_type':'POEI','nb_postes':8,'nb_alternants':0,'opco':'OPCO EP',
+         'next_action':'Appel responsable RH','next_action_date':(date.today()+timedelta(days=4)).isoformat()},
+    ]
+    for d in demo:
+        c = Contact(**d, notes='Contact de démonstration PBA', created_at=date.today().isoformat())
+        db.session.add(c)
+    db.session.commit()
+    return jsonify({'ok': True, 'message': '10 contacts de démonstration créés !'})
 
 # ─── HEALTH CHECK (Railway / Render) ─────────────────────────────────────────
 @app.route('/health')

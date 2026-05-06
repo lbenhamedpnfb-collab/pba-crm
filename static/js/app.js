@@ -81,8 +81,15 @@ async function init(){
   G._strat = strat;
   ALL_TEMPLATES = strat?.templates || [];
   ALL_SCRIPTS   = strat?.scripts   || [];
+  buildSectorSidebar();
   updSidebar();
   render();
+  apiFetch('/api/emails/suivi').then(logs=>{
+    if(!logs)return;
+    const due=(logs||[]).filter(l=>l.status==='overdue'||l.status==='today').length;
+    const bdg=document.getElementById('bdg-relances');
+    if(bdg)bdg.textContent=due>0?due:(logs.length||'—');
+  });
 }
 
 function updSidebar(){
@@ -99,14 +106,7 @@ function updSidebar(){
   set('bdg-alt',altCount);
   set('bdg-part',partCount);
 
-  // sector list
-  const sectors=[...new Set(G.contacts.map(c=>c.sector).filter(Boolean))].sort();
-  const sb=document.getElementById('sb-sectors');
-  if(sb) sb.innerHTML=sectors.map(s=>`<div class="sb-item" data-v="sector-${s}" onclick="setSector('${esc(s)}')" style="padding-left:24px">
-    <span class="ic" style="font-size:12px">${s.split(' ')[0]||'🔷'}</span>
-    <span class="lbl" style="font-size:11px">${esc(s.replace(/^[^\s]+\s/,''))}</span>
-    <span class="bdg bdg-p">${G.contacts.filter(c=>c.sector===s).length}</span>
-  </div>`).join('');
+  buildSectorSidebar();
 }
 
 function setView(v){
@@ -159,7 +159,51 @@ function render(){
 function today(){return new Date().toISOString().split('T')[0];}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function fmtEur(n){if(!n)return '0€';if(n>=1000000)return (n/1000000).toFixed(1)+'M€';if(n>=1000)return Math.round(n/1000)+'k€';return n+'€';}
-function secColor(s){return SECTOR_COLORS[s]||'#9B2D8E';}
+function normSec(s){return(s||'').replace(/️/g,'').trim();}
+function canonSec(rawSec){
+  if(!rawSec)return '';
+  if(SECTOR_COLORS[rawSec])return rawSec;
+  const strip=s=>s.replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27FF}\u{FE00}-\u{FEFF}]/gu,'').replace(/️/g,'').trim().toLowerCase();
+  const plain=strip(rawSec);
+  if(!plain)return rawSec;
+  for(const k of Object.keys(SECTOR_COLORS)){
+    const kPlain=strip(k);
+    if(kPlain===plain)return k;
+    const kW=kPlain.split(/[\s\/,&]+/).filter(w=>w.length>2);
+    const pW=plain.split(/[\s\/,&]+/).filter(w=>w.length>2);
+    if(kW.length&&pW.length&&kW.some(w=>pW.some(pw=>pw.includes(w)||w.includes(pw))))return k;
+  }
+  return rawSec;
+}
+function secColor(s){if(!s)return'#9B2D8E';const canon=canonSec(s);return SECTOR_COLORS[canon]||'#9B2D8E';}
+function buildSectorSidebar(){
+  const secCounts={};
+  G.contacts.forEach(c=>{const canon=canonSec(c.sector);if(canon)secCounts[canon]=(secCounts[canon]||0)+1;});
+  const container=document.getElementById('sb-sectors');
+  if(!container)return;
+  const rendered=new Set();
+  let h='';
+  Object.entries(SECTOR_COLORS).forEach(([sec,col])=>{
+    const cnt=secCounts[sec]||0;
+    if(!cnt)return;
+    rendered.add(sec);
+    h+=`<div class="sb-item" data-v="sector" onclick="setSector('${esc(sec)}')" style="padding-left:24px">
+      <div class="sec-dot" style="background:${col}"></div>
+      <span class="lbl">${esc(sec)}</span>
+      <span class="bdg bdg-p">${cnt}</span>
+    </div>`;
+  });
+  Object.keys(secCounts).forEach(sec=>{
+    if(rendered.has(sec)||!secCounts[sec])return;
+    rendered.add(sec);
+    h+=`<div class="sb-item" data-v="sector" onclick="setSector('${esc(sec)}')" style="padding-left:24px">
+      <div class="sec-dot" style="background:#9B2D8E"></div>
+      <span class="lbl">${esc(sec)}</span>
+      <span class="bdg bdg-p">${secCounts[sec]}</span>
+    </div>`;
+  });
+  container.innerHTML=h;
+}
 function pipelineVal(c){
   const p=PROB[c.stage]||.05;
   return ((c.nb_postes||0)*3000+(c.nb_alternants||0)*7000)*p;
@@ -713,7 +757,8 @@ function toggleGroup(gi){
 
 // ─── SECTOR ───────────────────────────────────────────────────────────────────
 function rSector(sec){
-  const list=G.contacts.filter(c=>c.sector===sec).sort((a,b)=>(b.score||0)-(a.score||0));
+  const canonKey=canonSec(sec);
+  const list=G.contacts.filter(c=>canonSec(c.sector)===canonKey).sort((a,b)=>(b.score||0)-(a.score||0));
   return `<div style="padding:20px">
     <h2 style="font-size:16px;font-weight:900;margin-bottom:16px;color:${secColor(sec)}">${esc(sec)} — ${list.length} entreprises</h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">
@@ -904,11 +949,38 @@ function rMetrics(){
 }
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
+async function normalizeSectors(){
+  const r=await apiFetch('/api/admin/normalize-sectors',{method:'POST'});
+  if(r?.ok){
+    toast(`✓ ${r.fixed} secteur(s) corrigé(s) sur ${r.total} contacts`,'success');
+    if(r.fixed>0){
+      const contacts=await apiFetch('/api/contacts');
+      if(contacts){G.contacts=contacts;buildSectorSidebar();updSidebar();render();}
+    }
+  }else toast(r?.error||'Erreur','error');
+}
+async function seedDemo(){
+  if(!confirm('Charger 10 contacts de démonstration ?'))return;
+  const r=await apiFetch('/api/seed/demo',{method:'POST'});
+  if(r?.ok){
+    toast(r.message||'10 contacts créés !','success');
+    const contacts=await apiFetch('/api/contacts');
+    if(contacts){G.contacts=contacts;buildSectorSidebar();updSidebar();render();}
+  }else toast(r?.error||'Erreur','error');
+}
 function rSettings(){
   return `<div class="settings-wrap">
     <div class="settings-section">
       <h3>👥 Équipe PBA</h3>
       <div id="users-list"><div style="color:var(--mu);font-size:12px">Chargement…</div></div>
+    </div>
+    <div class="settings-section">
+      <h3>🔧 Outils Admin</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-s" onclick="normalizeSectors()">🔧 Normaliser les secteurs</button>
+        <button class="btn btn-s" onclick="seedDemo()">🌱 Charger démo (10 contacts)</button>
+        <button class="btn btn-s" onclick="exportCSV()">⬇ Exporter CSV</button>
+      </div>
     </div>
     <div class="settings-section">
       <h3>ℹ️ Informations CRM</h3>
@@ -918,7 +990,6 @@ function rSettings(){
         <div>🎓 Formations : POEI + Alternance (CAP, BP, BTS Esthétique)</div>
         <div>💼 OPCO : OPCO EP · OPCO Atlas</div>
         <div>📍 Île-de-France</div>
-        <div>🌐 <strong>localhost:5051</strong></div>
       </div>
     </div>
   </div>`;
